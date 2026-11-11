@@ -83,17 +83,14 @@ run(Volume, block_media_keys=True)
 def boost():
     ...
 </pre>
-
-
 <h2>🔍 Key tester</h2>
-
 <p>See what pypods receives from your headphones:</p>
 
 <pre lang="bash">
 python pypods.py       
 </pre>
 
-<h2>📡 Example: Morse code trainer</h2>
+<h2>📡 Example : Morse code trainer</h2>
 
 <p><code>morzyanka_testgame.py</code></p>
 
