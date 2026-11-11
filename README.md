@@ -1,6 +1,9 @@
 <div align="center">
 <h1>🎧 Pypods</h1>
-<p><b>Use earpods buttons as game controls in Python.</b></p>
+  <picture >
+  <source media="(prefers-color-scheme: dark)" width="1080" height="530"srcset="https://i.postimg.cc/vBZ0tL6m/glyph-mosaic-photo.png">
+  <img width="1080" height="530" src="https://i.postimg.cc/QdcY8M3G/glyph-mosaic-photo-(1).png" alt="bg-earbuds" width="500">
+</picture>
 </div>
 <hr>
 
@@ -22,7 +25,7 @@ cd pypods
 pip install .
 </pre>
 
-<p>Requires Python 3.8+ and <a href="https://pypi.org/project/pynput/">pynput</a>.</p>
+<p>Requires <img alt = "win" width="15px" src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/python/python-original.svg" /> Python 3.8+ and <a href="https://pypi.org/project/pynput/">pynput</a>.</p>
 
 <h2>🚀 Quick start</h2>
 
@@ -72,7 +75,7 @@ run(Volume, block_media_keys=True)
   <tr><td><code>LONG_PRESS</code></td><td><code>long_pressed()</code></td><td>Held for a while</td></tr>
 </table>
 
-<p>Use callbacks if you prefer:</p>
+<p>You can use callbacks if you want :</p>
 
 <pre lang="python">
 @game.on(PLUS, "double_tap")
