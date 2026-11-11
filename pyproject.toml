@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pypods"
+version = "3.4.1"
+description = "Use headphone buttons (volume +, volume -, play/pause) as game controls in Python."
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = ["pynput>=1.7"]
+keywords = ["game", "input", "headphones", "media keys", "pynput", "terminal game"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Games/Entertainment",
+]
+
+[tool.setuptools]
+py-modules = ["pypods"]
