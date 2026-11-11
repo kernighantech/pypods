@@ -1,0 +1,744 @@
+# AI_README: building games with pypods
+
+> **This file is for AI assistants.** If someone sent you this repository (or this file) and asked you to make a game, read this whole file before writing any code. It is the complete and exact API of pypods. **If a name is not in this file, it does not exist.** Do not guess or invent functions, arguments or attributes.
+
+**For humans:** send your AI this repo or this file, then ask it something like:
+
+```text
+Read AI_README.md from the pypods repo and make me a game where <your idea>.
+Follow the rules in that file. Give me one .py file I can run.
+```
+
+---
+
+## Contents
+
+1. [What pypods is](#1-what-pypods-is)
+2. [Rules you must follow](#2-rules-you-must-follow)
+3. [Game template](#3-game-template)
+4. [Designing for three buttons](#4-designing-for-three-buttons)
+5. [Exact API reference](#5-exact-api-reference)
+6. [Timing and gesture rules](#6-timing-and-gesture-rules)
+7. [Recipes](#7-recipes)
+8. [Games with a window (pygame and others)](#8-games-with-a-window-pygame-and-others)
+9. [Testing without headphones](#9-testing-without-headphones)
+10. [Common mistakes](#10-common-mistakes)
+11. [Complete example game](#11-complete-example-game)
+12. [What to give back to the user](#12-what-to-give-back-to-the-user)
+
+---
+
+## 1. What pypods is
+
+- A single Python file, `pypods.py`, with one dependency: `pynput` (`pip install pynput`). Python 3.8 or newer.
+- It turns the three buttons on headphones (volume up, volume down, play/pause) into game inputs named `plus`, `minus` and `middle`.
+- It gives you a game loop: you subclass `Game` and fill in `setup`, `update(dt)`, `draw` and `teardown`.
+- It detects gestures: press, release, tap, double tap and long press.
+- It draws text in the terminal without flicker (`self.show(text)`).
+- Normal keyboard keys work too, so every game can be played and tested without headphones.
+- The input listener is system-wide: keys are heard even when the terminal or game window is not focused.
+
+---
+
+## 2. Rules you must follow
+
+1. **Use only the API in section 5.** Import from `pypods`. Do not invent methods such as `self.key_down()`, `self.draw_text()`, `self.sleep()` or `Game.on_press`.
+2. **Subclass `Game`. Do not write `__init__`.** Put start-up code in `setup()`. (Only if truly necessary: accept `**settings` and call `super().__init__(**settings)` first.)
+3. **Use actions, not raw buttons.** Define a `controls` dict on the class. **Every action must have a headphone button and at least one keyboard key**, so the game is testable without headphones.
+4. **Core gameplay uses only `PLUS`, `MINUS` and `MIDDLE`.** `NEXT` and `PREV` are not sent by every headset. You may add them as optional extras, never as the only way to do something.
+5. **Choose the right question:**
+   - `action_pressed` for one-off things (jump, fire, choose a menu item).
+   - `action_held` for continuous things (accelerate, steer, charge).
+   - `action_tapped` instead of `action_pressed` **when the same button also has a double-tap action**.
+6. **Multiply all movement and timers by `dt`.** Never assume a fixed frame time.
+7. **Draw with `self.show(text)` only.** Never call `print()` while the game is running. Printing after `run()` returns is fine.
+8. **Register callbacks (`on`, `on_action`) only in `setup()`.** To restart, write a separate `reset()` method and call that. Never call `setup()` again.
+9. **Never sleep or block in `update()` or `draw()`.** No `time.sleep()`, no `input()`. Use timers with `dt` instead.
+10. **Privacy: never record, save, print or send keystrokes.** Do not add logging of key names. The listener hears every key on the computer; pypods only keeps what is held right now, and your game must keep it that way.
+11. **Python 3.8 compatible.** No `match` statements, no `list[int]` / `X | Y` type hints, no other syntax newer than 3.8.
+12. **One runnable file per game**, ending with:
+
+    ```python
+    if __name__ == "__main__":
+        run(MyGame)
+    ```
+
+13. **Use a simple state machine** (`"menu"`, `"playing"`, `"paused"`, `"game_over"`) stored in a string attribute, and check it at the top of `update()` and `draw()`.
+
+---
+
+## 3. Game template
+
+Start every terminal game from this:
+
+```python
+from pypods import Game, PLUS, MINUS, MIDDLE, run, bar, clamp
+
+
+class MyGame(Game):
+    title = "My Game"
+    fps = 60
+    controls = {
+        "left":   [MINUS, "a", "left"],
+        "right":  [PLUS, "d", "right"],
+        "action": [MIDDLE, "space"],
+    }
+
+    def setup(self):
+        # runs once: create variables, register callbacks
+        self.state = "menu"
+        self.reset()
+
+    def reset(self):
+        # call this to start or restart a round (never call setup() again)
+        self.score = 0
+        self.x = 50.0
+
+    def update(self, dt):
+        if self.state == "menu":
+            if self.action_pressed("action"):
+                self.reset()
+                self.state = "playing"
+        elif self.state == "playing":
+            self.x += self.action_axis("left", "right") * 40 * dt
+            self.x = clamp(self.x, 0, 100)
+
+    def draw(self):
+        if self.state == "menu":
+            self.show("MY GAME\n\npress middle (or space) to start")
+        else:
+            self.show(f"x [{bar(self.x, 100, 30)}]\nscore {self.score}")
+
+    def teardown(self):
+        pass  # save high scores here
+
+
+if __name__ == "__main__":
+    run(MyGame)
+```
+
+---
+
+## 4. Designing for three buttons
+
+Headphones have three buttons. Gestures turn them into more inputs:
+
+| Button | Instant | Continuous | Gestures |
+|---|---|---|---|
+| `MINUS` (volume down) | press, release | held, held_for | tap, double tap, long press |
+| `MIDDLE` (play/pause) | press, release | held, held_for | tap, double tap, long press |
+| `PLUS` (volume up) | press, release | held, held_for | tap, double tap, long press |
+
+Plus `action_axis(minus_action, plus_action)` gives a -1 / 0 / 1 direction.
+
+**Conventions** (the bundled examples use these, so players will expect them):
+
+- `MINUS` = left / down / less / brake. `PLUS` = right / up / more / gas.
+- `MIDDLE` = the main action, confirm, or start.
+- Long-press `MIDDLE` = pause. Double-tap `MIDDLE` = restart.
+
+**Design advice:**
+
+- **Don't require two buttons at the same time.** Many headsets can't send that reliably.
+- **Don't design frame-perfect timing.** Bluetooth buttons can arrive with a small delay. Give the player generous windows.
+- **`tapped` is late by up to `double_tap_window` (0.30 s).** Don't use it for fast reactions. If a button needs instant response, don't give it a double tap.
+- **`pressed` always fires before a long press.** A button that is `pressed` for one thing and `long_pressed` for another will do both. Avoid that in the same state, or use `tapped` + `long_pressed` (a tap only counts if released before `long_press_time`).
+- **The player can't see the buttons.** Always show the controls on screen, for both headphones and keyboard.
+- On macOS and Linux the buttons still change the volume while playing. On Windows, set `block_media_keys = True` to stop that.
+
+---
+
+## 5. Exact API reference
+
+### Everything you can import
+
+```python
+from pypods import (
+    Game, Buttons, InputListener, Screen,            # classes
+    run, key_tester, normalize_name, bar, clamp,     # functions
+    PLUS, MINUS, MIDDLE, NEXT, PREV, HEADPHONE_BUTTONS, ANY,
+    PRESS, RELEASE, TAP, DOUBLE_TAP, LONG_PRESS, EVENTS,
+)
+```
+
+### Constants
+
+| Name | Value / meaning |
+|---|---|
+| `PLUS` | `"plus"`: volume up; also keyboard `=` and `+` |
+| `MINUS` | `"minus"`: volume down; also keyboard `-` and `_` |
+| `MIDDLE` | `"middle"`: play/pause |
+| `NEXT` | `"next"`: next track (not sent by every headset) |
+| `PREV` | `"prev"`: previous track (not sent by every headset) |
+| `HEADPHONE_BUTTONS` | tuple of all five above |
+| `ANY` | use with `on()` to get every button |
+| `PRESS`, `RELEASE`, `TAP`, `DOUBLE_TAP`, `LONG_PRESS` | `"press"`, `"release"`, `"tap"`, `"double_tap"`, `"long_press"` |
+| `EVENTS` | all five event names together |
+
+### Key names (for `controls` and `bind`)
+
+- Letters and digits: `"a"`, `"w"`, `"7"` (lowercase; Shift doesn't matter)
+- `"space"`, `"enter"`, `"esc"`, `"tab"`, `"backspace"`
+- Arrows: `"up"`, `"down"`, `"left"`, `"right"`
+- Modifiers: `"shift"`, `"ctrl_l"`, `"alt_l"`, `"cmd"`, and so on
+- Function keys: `"f1"` to `"f12"`
+- Unnamed keys: `"vk"` + code, e.g. `"vk96"`
+- Aliases are accepted: `"Space"` / `" "` → `"space"`, `"escape"` → `"esc"`, `"return"` → `"enter"`, `"volume_up"` → `"plus"`. `normalize_name(name)` returns the official name.
+
+**Warning:** `"="`, `"+"`, `"-"` and `"_"` already mean `plus` / `minus`. Don't bind them to other actions.
+
+### Functions
+
+| Function | What it does |
+|---|---|
+| `run(GameClass, **settings)` | creates the game, runs it, returns the game object. Also accepts an existing game object. Unknown setting names raise an error. |
+| `key_tester(block_media_keys=False)` | interactive tool that prints every key and gesture |
+| `normalize_name(name)` | official name of a key, e.g. `"="` → `"plus"` |
+| `bar(value, maximum, width=20, fill="█", empty="░")` | text progress bar string |
+| `clamp(value, low, high)` | limits a number to a range |
+
+### Game: settings (class attributes, or keyword arguments to `run()`; `run()` wins)
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `title` | `"Game"` | name of the game, for you to display |
+| `fps` | `60` | frames per second; `None` = as fast as possible |
+| `controls` | `{}` | `{action_name: [buttons...]}`; a single button may be a plain string |
+| `block_media_keys` | `False` | Windows only: stop headphone buttons from also changing volume/music while the game runs. Prints a warning on other systems. |
+| `block_volume_keys` | `False` | old name for `block_media_keys` |
+| `double_tap_window` | `0.30` | seconds allowed between taps for a double tap |
+| `long_press_time` | `0.50` | seconds to hold for a long press |
+| `max_dt` | `0.25` | largest allowed `dt`; `None` turns the cap off |
+| `listen` | `True` | `False` = don't read the keyboard (for tests or fed input) |
+
+### Game: methods you write
+
+| Method | When it runs |
+|---|---|
+| `setup(self)` | once, before the first frame |
+| `update(self, dt)` | every frame; `dt` = seconds since last frame |
+| `draw(self)` | every frame, after `update` |
+| `teardown(self)` | once when the game stops, **even after a crash or Ctrl+C** |
+
+### Game: read-only values
+
+| Attribute | Meaning |
+|---|---|
+| `self.dt` | seconds since the last frame |
+| `self.time` | seconds since the game loop started |
+| `self.frame` | number of frames drawn |
+| `self.running` | `True` while the loop runs |
+| `self.buttons` | the `Buttons` object |
+| `self.screen` | the `Screen` object used by `show()` |
+
+### Game: controls
+
+| Method | What it does |
+|---|---|
+| `self.bind(action, *buttons)` | adds buttons to an action (creates it if new) |
+| `self.unbind(action, *buttons)` | removes those buttons from an action |
+| `self.unbind(action)` | removes the whole action |
+| `self.bindings(action)` | tuple of buttons for one action, e.g. `("plus", "space")` |
+| `self.bindings()` | dict of every action and its buttons |
+
+An action is held if **any** of its buttons is held.
+
+### Game: input questions (use inside `update`)
+
+| Method | Returns | True when |
+|---|---|---|
+| `self.action_held(a)` | bool | any button of the action is down now |
+| `self.action_pressed(a)` | bool | a button went down this frame |
+| `self.action_released(a)` | bool | a button came up this frame |
+| `self.action_tapped(a)` | bool | a single short tap was confirmed this frame |
+| `self.action_double_tapped(a)` | bool | a double tap happened this frame |
+| `self.action_long_pressed(a)` | bool | a button just reached `long_press_time` while held |
+| `self.action_held_for(a)` | float | seconds held so far, `0.0` if up |
+| `self.action_axis(neg, pos)` | -1, 0, 1 | 1 if only `pos` held, -1 if only `neg`, 0 if both or neither |
+
+Every question gives the same answer for the whole frame, however often you ask.
+
+### Game: callbacks
+
+| Method | What it does |
+|---|---|
+| `self.on_action(action, event, fn)` | call `fn` when `event` happens to any button of `action`; at most once per frame |
+| `self.on(button, event, fn)` | same for one raw button; `event` defaults to `"press"` for both |
+| `self.on(ANY, event, fn)` | call `fn` for every button |
+| `self.buttons.off(button, event, fn)` | remove a callback added with `on` (omit `fn` to remove all for that button and event) |
+
+- `event` is one of the five event strings; a typo raises an error.
+- If you omit `event`, pass the function as a keyword: `self.on_action("jump", fn=self.jump)`.
+- `fn` takes zero arguments, or one (the button name for `on`, the action name for `on_action`).
+- Decorator form works: `@self.on_action("menu", DOUBLE_TAP)` above a function.
+- Callbacks run on the main thread, during the next frame, **before** `update()`.
+- Action callbacks look up bindings when the event happens, so `bind` order doesn't matter.
+
+### Game: other
+
+| Method | What it does |
+|---|---|
+| `self.show(text)` | draws text (multi-line OK), replacing what `show` drew last frame; skips redraw if unchanged |
+| `self.quit()` | stops after the current frame; `teardown` runs; `run()` returns the game object |
+| `self.run()` | starts the game (normally use the `run(MyGame)` function instead) |
+
+### Buttons (`self.buttons`, or create `Buttons()` yourself)
+
+| Member | What it does |
+|---|---|
+| `held(name)`, `pressed(name)`, `released(name)` | raw-button versions of the action questions |
+| `tapped(name)`, `double_tapped(name)`, `long_pressed(name)` | gestures for one button |
+| `held_for(name)` | seconds held, `0.0` if up |
+| `axis(negative, positive)` | -1 / 0 / 1 from two buttons, e.g. `axis(MINUS, PLUS)` |
+| `any_pressed()` | name of a button pressed this frame, or `None` |
+| `all_held()` | set of every button held now |
+| `on(name, event, fn)` / `off(name, event, fn)` | add / remove callbacks |
+| `press(name)`, `release(name)`, `tap(name)` | fake input; appears on the next frame |
+| `feed(name, is_down)` | low-level fake input; safe from any thread |
+| `clear()` | forget held buttons and half-finished gestures |
+| `update()` | advance one frame (only call it yourself when not using `Game`) |
+| `frame` | number of `update()` calls |
+| `double_tap_window`, `long_press_time` | gesture timings, changeable any time |
+
+### InputListener
+
+| Member | What it does |
+|---|---|
+| `InputListener(buttons, block_media_keys=False)` | create a listener that feeds a `Buttons` object |
+| `.start()` / `.stop()` | start / stop; `start()` returns the listener |
+| `with InputListener(buttons): ...` | starts on enter, always stops on exit |
+| `.running` | `True` while listening |
+| `.key_name(key)` | pynput key object → pypods name |
+
+### Screen
+
+| Member | What it does |
+|---|---|
+| `Screen()` or `Screen(some_file)` | terminal drawer (the `Game` makes one for you) |
+| `.show(text)` | same as `Game.show` |
+| `.finish()` | moves the cursor below the drawn text |
+
+---
+
+## 6. Timing and gesture rules
+
+| Event | Reported |
+|---|---|
+| press | the frame the button goes down |
+| release | the frame it comes up |
+| tap | after a short press (released before `long_press_time`) **and** after `double_tap_window` has passed with no second press |
+| double tap | on the second press, if it comes within `double_tap_window` of the first tap's release |
+| long press | once, when held for `long_press_time`, while still down |
+
+Consequences:
+
+- A double tap also produces **two** `pressed` events.
+- A long press also produced a `pressed` event when it started.
+- On the release frame, `held_for` is already `0.0`. Save it while held if you need it (see the charge recipe).
+- `dt` is capped at `max_dt` (0.25 s), and the first frame's `dt` does not include `setup()` time.
+
+---
+
+## 7. Recipes
+
+### Press any button to start
+
+```python
+if self.state == "menu" and self.buttons.any_pressed():
+    self.reset()
+    self.state = "playing"
+```
+
+### Pause with long press, restart with double tap (callbacks)
+
+```python
+controls = {"menu": [MIDDLE, "p"]}
+
+def setup(self):
+    self.state = "playing"
+    self.on_action("menu", LONG_PRESS, self.toggle_pause)
+    self.on_action("menu", DOUBLE_TAP, self.restart)
+    self.reset()
+
+def toggle_pause(self):
+    self.state = "paused" if self.state == "playing" else "playing"
+    self.buttons.clear()          # forget half-finished gestures
+
+def restart(self):
+    self.reset()
+    self.state = "playing"
+
+def update(self, dt):
+    if self.state == "paused":
+        return                    # nothing moves while paused
+    ...
+```
+
+### Charge-up move
+
+```python
+def update(self, dt):
+    if self.action_held("fire"):
+        self.charge = self.action_held_for("fire")
+    if self.action_released("fire"):
+        self.shoot(power=min(self.charge, 2.0))
+        self.charge = 0.0
+```
+
+### Smooth movement with two buttons
+
+```python
+self.x += self.action_axis("left", "right") * 100 * dt   # 100 units per second
+self.x = clamp(self.x, 0, 100)
+```
+
+### Lane switching (one step per press)
+
+```python
+if self.action_pressed("left"):
+    self.lane = max(0, self.lane - 1)
+if self.action_pressed("right"):
+    self.lane = min(2, self.lane + 1)
+```
+
+### Timers and spawning (never `time.sleep`)
+
+```python
+self.spawn_timer -= dt
+if self.spawn_timer <= 0:
+    self.spawn_enemy()
+    self.spawn_timer = 1.5
+```
+
+### Drawing a row of cells
+
+```python
+def draw(self):
+    row = ["."] * 20
+    row[int(self.x / 100 * 19)] = "@"
+    self.show("".join(row) + f"\nscore {self.score}")
+```
+
+### Saving a high score
+
+`teardown` runs even after a crash, so don't assume every attribute exists:
+
+```python
+import json
+from pathlib import Path
+
+SAVE_FILE = Path(__file__).with_name("highscore.json")
+
+def load_best():
+    try:
+        return int(json.loads(SAVE_FILE.read_text())["best"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return 0
+
+def teardown(self):
+    try:
+        SAVE_FILE.write_text(json.dumps({"best": getattr(self, "best", 0)}))
+    except OSError:
+        pass
+```
+
+### Changing controls at run time
+
+```python
+self.bind("jump", "w")            # add W to jump
+self.unbind("jump", "space")      # remove Space from jump
+current = self.bindings()         # dict: action -> buttons
+```
+
+### Reading the result after the game
+
+```python
+game = run(MyGame)
+print("final score:", game.score)
+```
+
+---
+
+## 8. Games with a window (pygame and others)
+
+If the game needs graphics, use your own loop with `Buttons` and `InputListener` instead of `Game`. Call `buttons.update()` **once per frame, before reading input**:
+
+```python
+import pygame
+from pypods import Buttons, InputListener, PLUS, MINUS, MIDDLE
+
+pygame.init()
+screen = pygame.display.set_mode((640, 480))
+clock = pygame.time.Clock()
+buttons = Buttons()
+
+with InputListener(buttons, block_media_keys=True):
+    x, running = 320, True
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+
+        buttons.update()                       # once per frame, before you read input
+        x += buttons.axis(MINUS, PLUS) * 5
+        if buttons.pressed(MIDDLE):
+            x = 320
+
+        screen.fill((20, 20, 30))
+        pygame.draw.circle(screen, (240, 200, 60), (x, 240), 20)
+        pygame.display.flip()
+        clock.tick(60)
+```
+
+- The same pattern works with any loop (arcade, tkinter's `after`, etc.): one `buttons.update()` per frame, then ask questions.
+- Keyboard keys come through the listener too, so bind or check names like `"space"` with `buttons.pressed("space")`.
+- The listener hears keys even when the window is in the background.
+- Tell the user to install the extra library (e.g. `pip install pygame`).
+
+---
+
+## 9. Testing without headphones
+
+**Raw buttons:** fake input appears on the next `update()`:
+
+```python
+from pypods import Buttons, PLUS
+
+b = Buttons()
+b.press(PLUS)
+b.update()
+assert b.pressed(PLUS)
+b.release(PLUS)
+b.update()
+assert b.released(PLUS)
+```
+
+**A whole game:** run it with `listen=False` and script the input in a subclass:
+
+```python
+from pypods import run, MIDDLE
+from my_game import MyGame
+
+class ScriptedGame(MyGame):
+    def update(self, dt):
+        if self.frame == 10:
+            self.buttons.tap(MIDDLE)      # shows up on the next frame
+        super().update(dt)
+        if self.frame >= 120:
+            self.quit()
+
+game = run(ScriptedGame, listen=False)
+assert game.state == "playing"
+```
+
+The repository's own tests (`python -m unittest discover tests`) use a fake pynput, so they run without pynput or headphones. Look at the `tests` folder for more patterns.
+
+**Real hardware:** tell the user to run `python pypods.py` (the key tester) to see which buttons and gestures their headphones actually send.
+
+---
+
+## 10. Common mistakes
+
+| Wrong | Right |
+|---|---|
+| Writing `__init__` | Put start-up code in `setup()` |
+| `if self.action_held("jump"): jump()` | `action_pressed`: `held` jumps every frame |
+| `pressed` for single action **and** `double_tapped` on the same button | Use `tapped` for the single action |
+| `self.x += 5` | `self.x += 300 * dt` |
+| `print()` inside `update`/`draw` | `self.show(...)` |
+| Calling `setup()` to restart | Write and call `reset()` |
+| Registering callbacks in `update()` | Register once in `setup()` |
+| `time.sleep()` or `input()` in the loop | Timers with `dt` |
+| Only headphone buttons in `controls` | Add keyboard keys to every action |
+| Requiring `NEXT` / `PREV` | Optional extras only |
+| Binding `"-"` or `"="` to a different action | They already mean `minus` / `plus` |
+| `on_action("jump", self.jump)` (function in the event slot) | `on_action("jump", fn=self.jump)` |
+| Logging pressed keys to a file | Never store keystrokes |
+| Inventing an API like `self.text()` | Only use section 5 |
+
+---
+
+## 11. Complete example game
+
+"Stop the Needle": a needle sweeps back and forth. Press the middle button to stop it inside the target zone. 10 rounds, faster each round. Shows menu, states, timers, `bar`, `clamp`, `tapped` vs `long_pressed`, `buttons.clear()`, and a saved high score.
+
+```python
+import json
+import random
+from pathlib import Path
+
+from pypods import Game, PLUS, MINUS, MIDDLE, run, bar, clamp
+
+SAVE_FILE = Path(__file__).with_name("needle_best.json")
+ROUNDS = 10
+WIDTH = 40
+
+
+class StopTheNeedle(Game):
+    title = "Stop the Needle"
+    fps = 60
+    controls = {
+        "less": [MINUS, "a", "left"],
+        "more": [PLUS, "d", "right"],
+        "go":   [MIDDLE, "space", "enter"],
+    }
+
+    # ---------- life cycle ----------
+
+    def setup(self):
+        self.best = self.load_best()
+        self.difficulty = 3
+        self.state = "menu"
+        self.reset()
+
+    def reset(self):
+        self.round = 0
+        self.score = 0
+        self.message = ""
+        self.new_round()
+
+    def new_round(self):
+        self.round += 1
+        self.needle = 0.0
+        self.direction = 1
+        self.speed = (40 + 25 * self.difficulty) * (1.05 ** self.round)
+        self.zone = 30 - 4 * self.difficulty
+        self.target = random.uniform(20, 80)
+        self.result_timer = 0.0
+
+    def teardown(self):
+        try:
+            SAVE_FILE.write_text(json.dumps({"best": getattr(self, "best", 0)}))
+        except OSError:
+            pass
+
+    # ---------- logic ----------
+
+    def update(self, dt):
+        if self.state == "menu":
+            if self.action_pressed("less"):
+                self.difficulty = clamp(self.difficulty - 1, 1, 5)
+            if self.action_pressed("more"):
+                self.difficulty = clamp(self.difficulty + 1, 1, 5)
+            if self.action_pressed("go"):
+                self.reset()
+                self.state = "playing"
+
+        elif self.state == "playing":
+            self.needle += self.direction * self.speed * dt
+            if self.needle >= 100:
+                self.needle, self.direction = 100.0, -1
+            elif self.needle <= 0:
+                self.needle, self.direction = 0.0, 1
+
+            if self.action_pressed("go"):          # instant: this button has no other job here
+                distance = abs(self.needle - self.target)
+                points = round(clamp(100 - distance / (self.zone / 2) * 50, 0, 100))
+                self.score += points
+                self.message = f"+{points} points"
+                self.result_timer = 1.0
+                self.state = "result"
+
+        elif self.state == "result":
+            self.result_timer -= dt
+            if self.result_timer <= 0:
+                if self.round >= ROUNDS:
+                    self.best = max(self.best, self.score)
+                    self.buttons.clear()           # drop gestures left over from the last round
+                    self.state = "game_over"
+                else:
+                    self.new_round()
+                    self.state = "playing"
+
+        elif self.state == "game_over":
+            # tapped + long_pressed on the same button never clash:
+            # a tap only counts if released before long_press_time
+            if self.action_tapped("go"):
+                self.reset()
+                self.state = "playing"
+            if self.action_long_pressed("go"):
+                self.quit()
+
+    # ---------- drawing ----------
+
+    def track(self):
+        low = self.target - self.zone / 2
+        high = self.target + self.zone / 2
+        needle_cell = int(self.needle / 100 * (WIDTH - 1))
+        cells = []
+        for i in range(WIDTH):
+            x = i / (WIDTH - 1) * 100
+            if i == needle_cell:
+                cells.append("|")
+            elif low <= x <= high:
+                cells.append("=")
+            else:
+                cells.append(".")
+        return "".join(cells)
+
+    def draw(self):
+        if self.state == "menu":
+            self.show(
+                "STOP THE NEEDLE\n\n"
+                f"difficulty [{bar(self.difficulty, 5, 10)}] {self.difficulty}\n\n"
+                "minus / plus (or A / D): change difficulty\n"
+                "middle (or Space): start\n\n"
+                f"best score: {self.best}"
+            )
+        elif self.state == "game_over":
+            self.show(
+                "GAME OVER\n\n"
+                f"score {self.score}    best {self.best}\n\n"
+                "tap middle (or Space): play again\n"
+                "long-press middle (or hold Space): quit"
+            )
+        else:
+            hint = self.message if self.state == "result" else "press middle (or Space) to stop the needle"
+            self.show(
+                f"round {self.round}/{ROUNDS}    score {self.score}    best {self.best}\n\n"
+                f"[{self.track()}]\n\n"
+                f"{hint}"
+            )
+
+    # ---------- saving ----------
+
+    def load_best(self):
+        try:
+            return int(json.loads(SAVE_FILE.read_text())["best"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return 0
+
+
+if __name__ == "__main__":
+    game = run(StopTheNeedle)
+    print(f"final score: {game.score}")
+```
+
+---
+
+## 12. What to give back to the user
+When you finish a game, give the user:
+
+1. **One `.py` file** that runs with `python my_game.py`, with `pypods.py` in the same folder (or pypods installed).
+2. **How to install and run it:**
+
+   ```bash
+   pip install pynput
+   python my_game.py
+   ```
+
+3. **A controls table** with both headphone and keyboard inputs, for example:
+
+   | Action | Headphones | Keyboard |
+   |---|---|---|
+   | Move left | volume down | A / ← |
+   | Move right | volume up | D / → |
+   | Pause | long-press middle | hold P |
+
+4. **Short notes when relevant:**
+   - Run `python pypods.py` first to check what the headphones send.
+   - macOS: allow the terminal under System Settings → Privacy & Security → Accessibility and Input Monitoring.
+   - Windows: `block_media_keys = True` stops the buttons from changing the volume.
+   - Quit with Ctrl+C at any time.
+
+Before you hand it over, check: no invented API, no `__init__`, every action has a keyboard key, movement uses `dt`, no `print()` during the game, callbacks only in `setup()`, nothing stores keystrokes, Python 3.8 syntax.
