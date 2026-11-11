@@ -2,8 +2,8 @@
 <h1>Pypods</h1>
   <picture >
     
-  <source media="(prefers-color-scheme: dark)" width="1080" height="530"srcset="https://i.postimg.cc/vBZ0tL6m/glyph-mosaic-photo.png">
-  <img width="1080" height="530" src="https://i.postimg.cc/QdcY8M3G/glyph-mosaic-photo-(1).png" alt="bg-earbuds" width="500">
+  <source media="(prefers-color-scheme: dark)" width="1081" height="530"srcset="https://i.postimg.cc/vBZ0tL6m/glyph-mosaic-photo.png">
+  <img width="1081" height="530" src="https://i.postimg.cc/QdcY8M3G/glyph-mosaic-photo-(1).png" alt="bg-earbuds" width="500">
 </picture>
 </div>
 <hr>
